@@ -1,5 +1,7 @@
 locals {
-  state_bucket_name = var.state_bucket_name == "" ? "${var.project_name}-tfstate-${data.aws_caller_identity.current.account_id}" : var.state_bucket_name
+  # Terraform state bucket name. S3 names are global: must be unique across all AWS accounts.
+  # If you change it, also update bucket in envs/dev/backend.tf and envs/prod/backend.tf.
+  state_bucket_name = "asthira-tfstate-dev"
 
   # GitHub Actions OIDC issuer and the audience aws-actions/configure-aws-credentials requests.
   github_oidc_host = "token.actions.githubusercontent.com"
