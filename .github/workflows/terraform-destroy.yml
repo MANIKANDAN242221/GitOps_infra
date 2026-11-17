@@ -1,0 +1,150 @@
+name: terraform-destroy
+
+# Manual only: Actions -> terraform-destroy -> Run workflow.
+# Destroys everything in envs/<environment>. The bootstrap stack (state bucket, OIDC role) is NOT touched.
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Environment to destroy"
+        type: choice
+        options: [dev, prod]
+        required: true
+      confirm:
+        description: "Type the environment name again to confirm (dev or prod)"
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+env:
+  TF_VERSION: "1.16.x"
+  TF_IN_AUTOMATION: "true"
+  TF_INPUT: "false"
+  ENV_DIR: envs/${{ inputs.environment }}
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Plan the destroy (shows what will be deleted, no approval needed yet)
+  # ---------------------------------------------------------------------------
+  plan-destroy:
+    if: github.ref == 'refs/heads/main' && inputs.confirm == inputs.environment
+    runs-on: ubuntu-latest
+    # Don't run while an apply for the same environment is running.
+    concurrency:
+      group: terraform-apply-${{ inputs.environment }}
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      id-token: write
+    defaults:
+      run:
+        working-directory: ${{ env.ENV_DIR }}
+    env:
+      TF_VAR_gitops_repo_token: ${{ secrets.GITOPS_REPO_TOKEN }}
+      TF_VAR_grafana_admin_password: ${{ secrets.GRAFANA_ADMIN_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+      - name: AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.TF_ROLE_ARN }}
+          role-session-name: github-${{ github.run_id }}-plan-destroy-${{ inputs.environment }}
+          aws-region: ${{ vars.AWS_REGION }}
+      - name: terraform init
+        run: terraform init
+      - name: terraform plan -destroy
+        run: |
+          terraform plan -destroy -out=destroy.tfplan
+          terraform show -no-color destroy.tfplan > destroy.txt
+      - name: Destroy summary
+        run: |
+          {
+            echo "### Destroy plan: ${{ inputs.environment }}"
+            echo '```'
+            grep -E '^(Plan:|No changes\.)' destroy.txt || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload destroy plan
+        uses: actions/upload-artifact@v4
+        with:
+          name: destroy-${{ inputs.environment }}
+          retention-days: 1
+          include-hidden-files: true # .terraform.lock.hcl
+          path: |
+            ${{ env.ENV_DIR }}/destroy.tfplan
+            ${{ env.ENV_DIR }}/destroy.txt
+            ${{ env.ENV_DIR }}/.terraform.lock.hcl
+
+  # ---------------------------------------------------------------------------
+  # Destroy (waits for approval on the chosen environment)
+  # ---------------------------------------------------------------------------
+  destroy:
+    needs: plan-destroy
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    concurrency:
+      group: terraform-apply-${{ inputs.environment }}
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      id-token: write
+    defaults:
+      run:
+        working-directory: ${{ env.ENV_DIR }}
+    env:
+      TF_VAR_gitops_repo_token: ${{ secrets.GITOPS_REPO_TOKEN }}
+      TF_VAR_grafana_admin_password: ${{ secrets.GRAFANA_ADMIN_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+      - name: Download destroy plan
+        uses: actions/download-artifact@v4
+        with:
+          name: destroy-${{ inputs.environment }}
+          path: ${{ env.ENV_DIR }}
+      - name: AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.TF_ROLE_ARN }}
+          role-session-name: github-${{ github.run_id }}-destroy-${{ inputs.environment }}
+          aws-region: ${{ vars.AWS_REGION }}
+      - name: terraform init
+        run: terraform init
+
+      # Argo CD apps and their LoadBalancers/Ingresses create AWS resources Terraform doesn't track.
+      # Left running, they block VPC deletion, and Argo CD self-heal would recreate anything deleted by hand.
+      # So: delete the Argo CD apps first, then any leftover load balancers, then let them drain.
+      - name: Clean up Kubernetes-created AWS resources
+        run: |
+          KUBECONFIG_CMD="$(terraform output -raw kubeconfig_command 2>/dev/null || true)"
+          if [ -z "$KUBECONFIG_CMD" ] || ! eval "$KUBECONFIG_CMD"; then
+            echo "Cluster not found or not reachable; skipping cleanup."
+            exit 0
+          fi
+
+          echo "Deleting Argo CD applications (finalizers remove their resources)..."
+          kubectl delete applications.argoproj.io --all --all-namespaces --wait=true --timeout=10m || true
+
+          echo "Deleting Ingresses..."
+          kubectl delete ingress --all --all-namespaces --wait=true --timeout=5m || true
+
+          echo "Deleting LoadBalancer Services..."
+          kubectl get svc --all-namespaces -o jsonpath='{range .items[?(@.spec.type=="LoadBalancer")]}{.metadata.namespace}{" "}{.metadata.name}{"\n"}{end}' \
+            | while read -r ns name; do
+                [ -n "$name" ] && kubectl delete svc "$name" -n "$ns" --wait=true --timeout=5m || true
+              done
+
+          echo "Waiting 90s for AWS load balancers and their network interfaces to be released..."
+          sleep 90
+
+      - name: terraform apply (destroy)
+        run: terraform apply destroy.tfplan
