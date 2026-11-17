@@ -16,7 +16,10 @@ endpoint_public_access = true
 public_access_cidrs    = ["0.0.0.0/0"]
 
 terraform_ci_role_arn = "arn:aws:iam::772721871682:role/gitops-terraform-ci-role" # CHANGE ME: bootstrap output
-cluster_admin_arns    = []                                                        # e.g. your SSO admin role ARN
+# IAM users/roles that get kubectl + console access (AmazonEKSClusterAdminPolicy).
+cluster_admin_arns = [
+  "arn:aws:iam::772721871682:user/AccessKeyUser",
+]
 
 node_instance_types = ["c7i-flex.large"]
 node_capacity_type  = "ON_DEMAND"
