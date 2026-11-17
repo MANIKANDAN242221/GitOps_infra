@@ -1,7 +1,5 @@
 name: terraform-destroy
 
-# Manual only: Actions -> terraform-destroy -> Run workflow.
-# Destroys everything in envs/<environment>. The bootstrap stack (state bucket, OIDC role) is NOT touched.
 on:
   workflow_dispatch:
     inputs:
