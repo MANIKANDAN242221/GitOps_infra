@@ -6,9 +6,13 @@ locals {
   github_oidc_provider_arn = var.create_github_oidc_provider ? try(aws_iam_openid_connect_provider.github[0].arn, null) : try(data.aws_iam_openid_connect_provider.github[0].arn, null)
 
   # Default to "any branch/tag/PR/environment of the listed repos" when no explicit subjects are given.
-  github_subjects = length(var.github_subjects) > 0 ? var.github_subjects : [
-    for repo in var.github_repositories : "repo:${repo}:*"
-  ]
+  # Covers both the legacy sub (repo:owner/repo:...) and the ID form (repo:owner@123/repo@456:...).
+  github_subjects = length(var.github_subjects) > 0 ? var.github_subjects : flatten([
+    for repo in var.github_repositories : [
+      "repo:${repo}:*",
+      "repo:${split("/", repo)[0]}@*/${split("/", repo)[1]}@*:*",
+    ]
+  ])
 }
 
 data "aws_partition" "current" {}

@@ -7,8 +7,11 @@ locals {
   github_oidc_host = "token.actions.githubusercontent.com"
   github_audience  = "sts.amazonaws.com"
 
+  # GitHub now puts owner/repo IDs in the sub claim (repo:owner@123/repo@456:ref:...);
+  # allow that form and the legacy repo:owner/repo:... form.
   terraform_ci_subjects = length(var.terraform_ci_subjects) > 0 ? var.terraform_ci_subjects : [
-    "repo:${var.github_infra_repo}:*"
+    "repo:${var.github_infra_repo}:*",
+    "repo:${split("/", var.github_infra_repo)[0]}@*/${split("/", var.github_infra_repo)[1]}@*:*",
   ]
 }
 
