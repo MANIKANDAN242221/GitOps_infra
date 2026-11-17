@@ -1,4 +1,4 @@
-aws_region   = "us-east-1"
+aws_region   = "ap-south-1"
 project_name = "gitops"
 environment  = "dev"
 
@@ -30,13 +30,13 @@ node_max_size       = 3
 ecr_repository_names = ["frontend", "backend"]
 ecr_force_delete     = true
 
-github_app_repositories = ["https://github.com/MANIKANDAN242221/GitOps_app.git"] 
+github_app_repositories = ["MANIKANDAN242221/GitOps_app"]
 
 # -----------------------------------------------------------------------------
 # Argo CD (token comes from TF_VAR_gitops_repo_token)
 # -----------------------------------------------------------------------------
 gitops_repo_url      = "https://github.com/MANIKANDAN242221/GitOps_Argocd.git" # CHANGE ME
-gitops_repo_username = "GitOps_token"                                 
+gitops_repo_username = "GitOps_token"
 gitops_repo_path     = "apps/dev"
 gitops_repo_revision = "main"
 
