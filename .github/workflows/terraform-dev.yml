@@ -1,1 +1,162 @@
+name: terraform-dev
 
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "envs/dev/**"
+      - "modules/**"
+      - ".github/workflows/terraform-dev.yml"
+  push:
+    branches: [main]
+    paths:
+      - "envs/dev/**"
+      - "modules/**"
+      - ".github/workflows/terraform-dev.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# New pushes to a PR cancel its older run; runs on main never cancel each other.
+concurrency:
+  group: terraform-dev-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+env:
+  TF_VERSION: "1.16.x"
+  TF_IN_AUTOMATION: "true"
+  TF_INPUT: "false"
+  TF_PLUGIN_CACHE_DIR: ${{ github.workspace }}/.terraform-plugin-cache
+  ENV_DIR: envs/dev
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Validate
+  # ---------------------------------------------------------------------------
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+      - name: Plugin cache
+        uses: actions/cache@v4
+        with:
+          path: .terraform-plugin-cache
+          key: terraform-plugins-${{ hashFiles('**/.terraform.lock.hcl') }}
+          restore-keys: terraform-plugins-
+      - run: mkdir -p "$TF_PLUGIN_CACHE_DIR"
+      - name: terraform fmt
+        run: terraform fmt -check -recursive -diff envs/dev modules
+      - name: terraform validate
+        working-directory: ${{ env.ENV_DIR }}
+        run: |
+          terraform init -backend=false
+          terraform validate
+
+  # ---------------------------------------------------------------------------
+  # Plan
+  # ---------------------------------------------------------------------------
+  plan:
+    needs: validate
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # OIDC token for AWS, no stored keys
+    defaults:
+      run:
+        working-directory: envs/dev
+    env:
+      TF_VAR_gitops_repo_token: ${{ secrets.GITOPS_REPO_TOKEN }}
+      TF_VAR_grafana_admin_password: ${{ secrets.GRAFANA_ADMIN_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+      - name: Plugin cache
+        uses: actions/cache@v4
+        with:
+          path: .terraform-plugin-cache
+          key: terraform-plugins-${{ hashFiles('**/.terraform.lock.hcl') }}
+          restore-keys: terraform-plugins-
+      - run: mkdir -p "$TF_PLUGIN_CACHE_DIR"
+      - name: AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.TF_ROLE_ARN }}
+          role-session-name: github-${{ github.run_id }}-plan-dev
+          aws-region: ${{ vars.AWS_REGION }}
+      - run: aws sts get-caller-identity
+      - name: terraform init
+        run: terraform init
+      - name: terraform plan
+        run: |
+          terraform plan -out=plan.tfplan
+          terraform show -no-color plan.tfplan > plan.txt
+      - name: Plan summary
+        run: |
+          {
+            echo "### Plan: dev"
+            echo '```'
+            grep -E '^(Plan:|No changes\.|Changes to Outputs:)' plan.txt || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      # Anyone with read access to the repo can download artifacts, and plans can hold secrets.
+      # Keep the repo private, or drop this upload and re-plan in the apply job instead.
+      - name: Upload plan
+        uses: actions/upload-artifact@v4
+        with:
+          name: plan-dev
+          retention-days: 7
+          include-hidden-files: true # .terraform.lock.hcl
+          path: |
+            envs/dev/plan.tfplan
+            envs/dev/plan.txt
+            envs/dev/.terraform.lock.hcl
+
+  # ---------------------------------------------------------------------------
+  # Apply (main only, waits for approval on the "dev" environment if reviewers are set)
+  # ---------------------------------------------------------------------------
+  apply:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: plan
+    runs-on: ubuntu-latest
+    environment: dev
+    concurrency:
+      group: terraform-apply-dev
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      id-token: write
+    defaults:
+      run:
+        working-directory: envs/dev
+    env:
+      TF_VAR_gitops_repo_token: ${{ secrets.GITOPS_REPO_TOKEN }}
+      TF_VAR_grafana_admin_password: ${{ secrets.GRAFANA_ADMIN_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+      - name: Download plan
+        uses: actions/download-artifact@v4
+        with:
+          name: plan-dev
+          path: envs/dev
+      - name: AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.TF_ROLE_ARN }}
+          role-session-name: github-${{ github.run_id }}-apply-dev
+          aws-region: ${{ vars.AWS_REGION }}
+      - name: terraform init
+        run: terraform init
+      - name: terraform apply
+        run: terraform apply plan.tfplan
