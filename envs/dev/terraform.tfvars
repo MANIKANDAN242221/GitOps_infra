@@ -19,6 +19,7 @@ terraform_ci_role_arn = "arn:aws:iam::772721871682:role/gitops-terraform-ci-role
 # IAM users/roles that get kubectl + console access (AmazonEKSClusterAdminPolicy).
 cluster_admin_arns = [
   "arn:aws:iam::772721871682:user/AccessKeyUser",
+  "arn:aws:iam::772721871682:root", # AWS console sign-in (root user)
 ]
 
 node_instance_types = ["c7i-flex.large"]
