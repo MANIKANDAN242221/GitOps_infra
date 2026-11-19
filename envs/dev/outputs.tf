@@ -48,3 +48,12 @@ output "aws_load_balancer_controller_role_arn" {
   description = "IRSA role used by the AWS Load Balancer Controller."
   value       = module.iam.irsa_role_arns["aws-load-balancer-controller"]
 }
+
+output "ui_urls_command" {
+  description = "Command that prints the Argo CD, Grafana and Prometheus load balancer URLs (when expose_uis = true)."
+  value       = <<-EOT
+    echo "Argo CD:    http://$(kubectl -n argocd get svc argocd-server -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')"
+    echo "Grafana:    http://$(kubectl -n monitoring get svc kube-prometheus-stack-grafana -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')"
+    echo "Prometheus: http://$(kubectl -n monitoring get svc kube-prometheus-stack-prometheus -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'):9090"
+  EOT
+}

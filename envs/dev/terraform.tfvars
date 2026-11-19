@@ -49,3 +49,10 @@ gitops_repo_revision = "main"
 # -----------------------------------------------------------------------------
 prometheus_retention    = "7d"
 prometheus_storage_size = "20Gi"
+
+# -----------------------------------------------------------------------------
+# Public UIs: internet-facing NLBs for Argo CD, Grafana and Prometheus
+# -----------------------------------------------------------------------------
+expose_uis = true
+# Prometheus has no login. Narrow this to your own IP, e.g. ["203.0.113.10/32"].
+ui_allowed_cidrs = ["0.0.0.0/0"]

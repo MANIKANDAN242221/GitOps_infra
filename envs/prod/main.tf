@@ -13,6 +13,17 @@ locals {
     Environment = var.environment
     ManagedBy   = "terraform"
   })
+
+  # Internet-facing NLB from the AWS Load Balancer Controller, limited to ui_allowed_cidrs.
+  public_nlb_service = {
+    type = "LoadBalancer"
+    annotations = {
+      "service.beta.kubernetes.io/aws-load-balancer-type"            = "external"
+      "service.beta.kubernetes.io/aws-load-balancer-scheme"          = "internet-facing"
+      "service.beta.kubernetes.io/aws-load-balancer-nlb-target-type" = "ip"
+    }
+    loadBalancerSourceRanges = var.ui_allowed_cidrs
+  }
 }
 
 data "aws_availability_zones" "available" {
@@ -129,6 +140,8 @@ module "argocd" {
   root_app_path        = var.gitops_repo_path
   root_app_revision    = var.gitops_repo_revision
 
+  extra_values = var.expose_uis ? [yamlencode({ server = { service = local.public_nlb_service } })] : []
+
   # Ingresses synced by Argo CD need the controller (and its webhook) running first;
   # on destroy, Argo CD goes first so the controller can still clean up its ALBs.
   depends_on = [module.eks, module.aws_load_balancer_controller]
@@ -144,6 +157,11 @@ module "monitoring" {
   prometheus_storage_size = var.prometheus_storage_size
   grafana_admin_password  = var.grafana_admin_password
 
-  # Needs the EBS CSI driver add-on for its volumes.
-  depends_on = [module.eks]
+  extra_values = var.expose_uis ? [yamlencode({
+    grafana    = { service = local.public_nlb_service }
+    prometheus = { service = local.public_nlb_service }
+  })] : []
+
+  # Needs the EBS CSI driver add-on for its volumes, and the controller for its load balancers.
+  depends_on = [module.eks, module.aws_load_balancer_controller]
 }

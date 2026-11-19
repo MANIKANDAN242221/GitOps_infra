@@ -169,3 +169,18 @@ variable "grafana_admin_password" {
   default     = ""
   sensitive   = true
 }
+
+# -----------------------------------------------------------------------------
+# Public UIs (Argo CD, Grafana, Prometheus)
+# -----------------------------------------------------------------------------
+variable "expose_uis" {
+  description = "Give Argo CD, Grafana and Prometheus internet-facing NLBs. Prometheus has no login, so keep ui_allowed_cidrs tight."
+  type        = bool
+  default     = false
+}
+
+variable "ui_allowed_cidrs" {
+  description = "Source CIDRs allowed to reach the UI load balancers."
+  type        = list(string)
+  default     = ["0.0.0.0/0"]
+}
