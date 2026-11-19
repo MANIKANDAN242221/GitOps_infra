@@ -123,7 +123,15 @@ Console:
 
 ## STEP-6  IAM role for a service account (example: AWS Load Balancer Controller)
 
-Terraform: `modules/iam` → `irsa_roles` in `envs/dev/main.tf` (empty today; the EBS CSI role is in `modules/eks`)
+Terraform: `modules/iam` → `irsa_roles` in `envs/dev/main.tf` (role `gitops-dev-aws-load-balancer-controller-irsa-role`),
+policy and Helm release in `modules/aws-load-balancer-controller`. The EBS CSI role is in `modules/eks`.
+
+Check after apply:
+
+```sh
+kubectl -n kube-system get deploy aws-load-balancer-controller   # 2/2 READY
+kubectl get ingress -A                                           # ADDRESS = the ALB DNS name
+```
 
 Console:
 1. IAM → Roles → Create role → **Web identity**.

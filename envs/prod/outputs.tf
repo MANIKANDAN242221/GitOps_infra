@@ -43,3 +43,8 @@ output "grafana_admin_password" {
   value       = module.monitoring.grafana_admin_password
   sensitive   = true
 }
+
+output "aws_load_balancer_controller_role_arn" {
+  description = "IRSA role used by the AWS Load Balancer Controller."
+  value       = module.iam.irsa_role_arns["aws-load-balancer-controller"]
+}

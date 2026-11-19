@@ -91,7 +91,29 @@ module "iam" {
 
   eks_oidc_provider_arn = module.eks.oidc_provider_arn
   eks_oidc_issuer       = module.eks.oidc_issuer
-  irsa_roles            = {}
+  irsa_roles = {
+    aws-load-balancer-controller = {
+      namespace       = "kube-system"
+      service_account = "aws-load-balancer-controller"
+      policy_arns     = [module.aws_load_balancer_controller.iam_policy_arn]
+    }
+  }
+}
+
+# -----------------------------------------------------------------------------
+# AWS Load Balancer Controller (turns Ingress/Service into ALB/NLB)
+# -----------------------------------------------------------------------------
+module "aws_load_balancer_controller" {
+  source = "../../modules/aws-load-balancer-controller"
+
+  name_prefix   = local.name
+  cluster_name  = module.eks.cluster_name
+  vpc_id        = module.vpc.vpc_id
+  aws_region    = var.aws_region
+  irsa_role_arn = module.iam.irsa_role_arns["aws-load-balancer-controller"]
+
+  # Nodes, add-ons and access entries must exist before Helm can talk to the cluster.
+  depends_on = [module.eks]
 }
 
 # -----------------------------------------------------------------------------
@@ -107,8 +129,9 @@ module "argocd" {
   root_app_path        = var.gitops_repo_path
   root_app_revision    = var.gitops_repo_revision
 
-  # Nodes, add-ons and access entries must exist before Helm can talk to the cluster.
-  depends_on = [module.eks]
+  # Ingresses synced by Argo CD need the controller (and its webhook) running first;
+  # on destroy, Argo CD goes first so the controller can still clean up its ALBs.
+  depends_on = [module.eks, module.aws_load_balancer_controller]
 }
 
 # -----------------------------------------------------------------------------

@@ -1,0 +1,10 @@
+# Terraform working dirs (provider binaries, hundreds of MB)
+.terraform/
+*.tfplan
+plan.tfplan
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json

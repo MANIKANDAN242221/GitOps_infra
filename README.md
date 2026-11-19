@@ -13,6 +13,7 @@ modules/
   ecr/                     image repositories with scanning and lifecycle policies
   iam/                     GitHub Actions image-push role, IRSA roles
   argocd-bootstrap/        Argo CD (Helm), GitHub repo credentials, root app-of-apps
+  aws-load-balancer-controller/  AWS Load Balancer Controller (Helm) + its IAM policy; role comes from iam/
   monitoring-bootstrap/    kube-prometheus-stack (Prometheus, Alertmanager, Grafana), gp3 StorageClass
 .github/workflows/         fmt/validate/plan on PRs, approved apply on main (dev, then prod)
 ```
